@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Qwen3-ASR · Live Mic</title>
+<style>
+  :root{--bg:#0b0f17;--card:#121826;--muted:#8b97a8;--text:#e8edf4;--border:#222c3d;--ok:#22c55e;--warn:#f59e0b;--accent:#3b82f6;--danger:#ef4444;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text);height:100vh}
+  .wrap{max-width:860px;margin:0 auto;padding:24px;height:100vh;display:flex;flex-direction:column;gap:16px}
+  h1{font-size:18px;margin:0;font-weight:600}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  button{font-size:14px;font-weight:600;padding:10px 18px;border-radius:10px;border:1px solid var(--border);cursor:pointer;background:var(--card);color:var(--text)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pill{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+  .pill.live{color:#06240f;background:var(--ok);border-color:var(--ok)}
+  .pill.warn{color:#241a05;background:var(--warn);border-color:var(--warn)}
+  .meta{margin-left:auto;font-size:12px;color:var(--muted)}
+  .card{flex:1;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;overflow:auto;min-height:0}
+  #text{font-size:22px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  #text .tail{color:var(--muted)}
+  .hint{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <h1>Qwen3-ASR · Live Mic</h1>
+    <span class="meta" id="lang">—</span>
+  </div>
+  <div class="row">
+    <button id="start" class="primary">● Start</button>
+    <button id="stop" class="danger" disabled>■ Stop</button>
+    <span id="status" class="pill">idle</span>
+    <button id="clear">Clear</button>
+  </div>
+  <div class="card"><div id="text"></div></div>
+  <div class="hint">Sends 16&nbsp;kHz mono PCM over <code id="wsurl"></code>. Partial text updates as you speak; final on stop.</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const startBtn=$("start"),stopBtn=$("stop"),statusEl=$("status"),langEl=$("lang"),textEl=$("text");
+const WS_URL=(location.protocol==="https:"?"wss://":"ws://")+location.host+"/stream";
+$("wsurl").textContent=WS_URL;
+
+const TARGET_SR=16000, SEND_MS=200;
+let ws=null, audioCtx=null, source=null, processor=null, mediaStream=null;
+let buf=new Float32Array(0), running=false;
+
+function setStatus(t,cls){statusEl.textContent=t;statusEl.className="pill"+(cls?" "+cls:"");}
+function render(t){textEl.textContent=t||"";}
+
+function resample(input, srcSr){
+  if(srcSr===TARGET_SR) return input.slice();
+  const ratio=TARGET_SR/srcSr, n=Math.round(input.length*ratio), out=new Float32Array(n);
+  for(let i=0;i<n;i++){const x=i/ratio, x0=Math.floor(x), x1=Math.min(x0+1,input.length-1), t=x-x0; out[i]=input[x0]*(1-t)+input[x1]*t;}
+  return out;
+}
+function concat(a,b){const o=new Float32Array(a.length+b.length);o.set(a,0);o.set(b,a.length);return o;}
+
+startBtn.onclick=async()=>{
+  if(running) return;
+  render(""); langEl.textContent="—"; buf=new Float32Array(0);
+  try{
+    setStatus("connecting…","warn"); startBtn.disabled=true;
+    ws=new WebSocket(WS_URL); ws.binaryType="arraybuffer";
+    ws.onmessage=e=>{ let m; try{m=JSON.parse(e.data)}catch{return;}
+      if(m.language) langEl.textContent=m.language;
+      if(typeof m.text==="string") render(m.text);
+      if(m.type==="final"){ setStatus("done"); }
+    };
+    ws.onerror=()=>setStatus("ws error","warn");
+    ws.onclose=()=>{ if(running) setStatus("ws closed","warn"); };
+    await new Promise((res,rej)=>{ws.onopen=res; ws.addEventListener("error",rej,{once:true});});
+
+    mediaStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    source=audioCtx.createMediaStreamSource(mediaStream);
+    processor=audioCtx.createScriptProcessor(4096,1,1);
+    const sendSamples=Math.round(TARGET_SR*SEND_MS/1000);
+    processor.onaudioprocess=ev=>{
+      if(!running) return;
+      buf=concat(buf, resample(ev.inputBuffer.getChannelData(0), audioCtx.sampleRate));
+      while(buf.length>=sendSamples){
+        const chunk=buf.slice(0,sendSamples); buf=buf.slice(sendSamples);
+        if(ws.readyState===1) ws.send(chunk.buffer);
+      }
+    };
+    source.connect(processor); processor.connect(audioCtx.destination);
+    running=true; stopBtn.disabled=false; setStatus("listening… 🎙","live");
+  }catch(err){
+    console.error(err); setStatus("start failed: "+err.message,"warn");
+    startBtn.disabled=false; running=false; cleanupAudio();
+    if(ws&&ws.readyState===1) ws.close();
+  }
+};
+
+stopBtn.onclick=async()=>{
+  if(!running) return;
+  running=false; stopBtn.disabled=true; setStatus("finishing…","warn");
+  cleanupAudio();
+  try{
+    if(ws&&ws.readyState===1){
+      if(buf.length>0){ws.send(buf.buffer); buf=new Float32Array(0);}
+      ws.send(JSON.stringify({type:"eos"}));
+    }
+  }catch(e){console.error(e);}
+  startBtn.disabled=false;
+};
+
+function cleanupAudio(){
+  try{ if(processor){processor.disconnect();processor.onaudioprocess=null;} if(source)source.disconnect();
+       if(audioCtx)audioCtx.close(); if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  processor=source=audioCtx=mediaStream=null;
+}
+$("clear").onclick=()=>{render("");langEl.textContent="—";};
+</script>
+</body>
+</html>

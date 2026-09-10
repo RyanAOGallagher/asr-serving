@@ -1,0 +1,109 @@
+152a153,232
+> OPENAI_MODE = os.getenv("ANCHOR_BACKEND_MODE", "") == "openai"
+> _ASR_RE = re.compile(r"language ([A-Za-z]+)<asr_text>(.*)", re.S)
+> 
+> # Stock Qwen3-ASR template drops assistant turns entirely, so vllm-serve's
+> # continue_final_message can't see the 'language X<asr_text>' prefill. This
+> # copy is identical except it renders a final assistant message verbatim --
+> # giving byte parity with the toolkit's _build_text_prompt forcing suffix.
+> _CHAT_TEMPLATE = """{%- set ns = namespace(system_text="") -%}
+> {%- for m in messages -%}
+>   {%- if m.role == 'system' -%}
+>     {%- if m.content is string -%}
+>       {%- set ns.system_text = ns.system_text + m.content -%}
+>     {%- else -%}
+>       {%- for c in m.content -%}
+>         {%- if c.type == 'text' and (c.text is defined) -%}
+>           {%- set ns.system_text = ns.system_text + c.text -%}
+>         {%- endif -%}
+>       {%- endfor -%}
+>     {%- endif -%}
+>   {%- endif -%}
+> {%- endfor -%}
+> {%- set ns2 = namespace(audio_tokens="") -%}
+> {%- for m in messages -%}
+>   {%- if m.content is not string -%}
+>     {%- for c in m.content -%}
+>       {%- if c.type == 'audio' or ('audio' in c) or ('audio_url' in c) -%}
+>         {%- set ns2.audio_tokens = ns2.audio_tokens + "<|audio_start|><|audio_pad|><|audio_end|>" -%}
+>       {%- endif -%}
+>     {%- endfor -%}
+>   {%- endif -%}
+> {%- endfor -%}
+> {{- '<|im_start|>system\\n' + (ns.system_text if ns.system_text is string else '') + '<|im_end|>\\n' -}}
+> {{- '<|im_start|>user\\n' + ns2.audio_tokens + '<|im_end|>\\n' -}}
+> {%- if messages[-1].role == 'assistant' -%}
+> {{- '<|im_start|>assistant\\n' -}}
+> {%- if messages[-1].content is string -%}
+> {{- messages[-1].content -}}
+> {%- else -%}
+> {%- for c in messages[-1].content -%}{%- if c.type == 'text' and (c.text is defined) -%}{{- c.text -}}{%- endif -%}{%- endfor -%}
+> {%- endif -%}
+> {%- elif add_generation_prompt -%}
+> {{- '<|im_start|>assistant\\n' -}}
+> {%- endif -%}"""
+> 
+> 
+> async def _backend_decode_openai(audio: bytes, filename: str, context: str,
+>                                  language: str | None, logprobs: bool = False) -> dict:
+>     """Shim: same contract as backend_decode, but against a vllm-serve OpenAI
+>     endpoint (continuous batching). Mirrors the toolkit's prompt exactly:
+>     context as the system message, audio as the user turn, language forcing via
+>     an assistant prefill 'language X<asr_text>' with continue_final_message.
+>     ponytail: RESTRICT_SCRIPTS token mask not passed - bench copy only."""
+>     import base64 as _b64, math as _math
+>     mime = "audio/mpeg" if filename.lower().endswith(".mp3") else "audio/wav"
+>     msgs = [{"role": "system", "content": context or ""},
+>             {"role": "user", "content": [{"type": "audio_url", "audio_url": {
+>                 "url": f"data:{mime};base64,{_b64.b64encode(audio).decode()}"}}]}]
+>     body = {"messages": msgs, "temperature": 0, "chat_template": _CHAT_TEMPLATE}
+>     if language:
+>         msgs.append({"role": "assistant", "content": f"language {language}<asr_text>"})
+>         body["continue_final_message"] = True
+>         body["add_generation_prompt"] = False
+>     if logprobs:
+>         body["logprobs"] = True
+>     r = await _client.post(f"{BACKEND}/v1/chat/completions", json=body)
+>     r.raise_for_status()
+>     ch = r.json()["choices"][0]
+>     content = ch["message"]["content"] or ""
+>     full = (f"language {language}<asr_text>{content}") if language else content
+>     m = _ASR_RE.match(full)
+>     lang, text = (m.group(1), m.group(2)) if m else (language or "", full)
+>     out = {"text": text.strip(), "language": lang}
+>     lp = (ch.get("logprobs") or {}).get("content") or []
+>     if logprobs and lp:
+>         vals = [t["logprob"] for t in lp]
+>         out["min_token_confidence"] = float(_math.exp(min(vals)))
+>         out["confidence"] = float(_math.exp(sum(vals) / len(vals)))
+>     return out
+> 
+> 
+154a235,236
+>     if OPENAI_MODE:
+>         return await _backend_decode_openai(audio, filename, context, language, logprobs)
+293,303c375
+<     # Overlap the ko-guard with the first guard call: the Hangul branch consumes
+<     # both and neither depends on the other. (A speculative force-KO decode here
+<     # was measured 2026-09-08 and REVERTED: it cut escalated-tier latency ~20%
+<     # but fired on every Latin clip, and the ~5x wasted decodes congested the
+<     # backend enough to cost -30% overall throughput under stress load.)
+<     g_task = asyncio.ensure_future(guard(audio, filename, en_text=text))
+<     ko_guard_task = (asyncio.ensure_future(guard(audio, filename, ko_text=text))
+<                      if HANGUL.search(text) else None)
+<     if ko_guard_task is not None:
+<         ko_guard_task.add_done_callback(lambda t: t.cancelled() or t.exception())
+<     g = await g_task
+---
+>     g = await guard(audio, filename, en_text=text)
+321c393
+<         g2 = await ko_guard_task
+---
+>         g2 = await guard(audio, filename, ko_text=text)
+433,435d504
+<     if ko_guard_task is not None and not ko_guard_task.done():
+<         ko_guard_task.cancel()
+< 
+467a537,538
+>     if os.getenv("ANCHOR_NO_LOG", "") == "1":
+>         return out

@@ -1,0 +1,7 @@
+__pycache__/
+*.log
+*.bak*
+*.safetensors
+*.bin
+.venv/
+stress_clips/

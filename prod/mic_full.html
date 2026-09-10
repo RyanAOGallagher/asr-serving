@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Qwen3-ASR · /stream_full tester</title>
+<style>
+  :root{--bg:#0b0f17;--card:#121826;--muted:#8b97a8;--text:#e8edf4;--border:#222c3d;--ok:#22c55e;--warn:#f59e0b;--accent:#3b82f6;--danger:#ef4444;--gold:#eab308;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--text);height:100vh}
+  .wrap{max-width:1100px;margin:0 auto;padding:20px;height:100vh;display:flex;flex-direction:column;gap:14px}
+  h1{font-size:18px;margin:0;font-weight:600}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{font-size:14px;font-weight:600;padding:9px 16px;border-radius:10px;border:1px solid var(--border);cursor:pointer;background:var(--card);color:var(--text)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input{font-size:13px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#0d1420;color:var(--text)}
+  #ep{flex:1;min-width:280px;font-family:ui-monospace,Menlo,monospace}
+  #lang{width:120px}
+  .pill{font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);color:var(--muted)}
+  .pill.live{color:#06240f;background:var(--ok);border-color:var(--ok)}
+  .pill.warn{color:#241a05;background:var(--warn);border-color:var(--warn)}
+  .meta{font-size:12px;color:var(--muted)}
+  .grid{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:14px;min-height:0}
+  @media(max-width:720px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;overflow:auto;min-height:0;display:flex;flex-direction:column}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 10px}
+  .card.full h2{color:var(--gold)}
+  .body{font-size:19px;line-height:1.5;white-space:pre-wrap;word-break:break-word;flex:1}
+  .stat{font-size:12px;color:var(--muted);margin-top:10px}
+  .hint{font-size:12px;color:var(--muted)}
+  code{font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <h1>Qwen3-ASR · <code>/stream_full</code> tester</h1>
+    <span class="pill" id="status" style="margin-left:auto">idle</span>
+  </div>
+  <div class="row">
+    <input id="ep" spellcheck="false" />
+    <input id="lang" placeholder="lang (auto)" spellcheck="false" />
+    <button id="start" class="primary">● Start</button>
+    <button id="stop" class="danger" disabled>■ Stop</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>① Streaming (live, incremental)</h2>
+      <div class="body" id="streamText"></div>
+      <div class="stat" id="streamStat"></div>
+    </div>
+    <div class="card full">
+      <h2>② Full ASR pass (fresh, on stop)</h2>
+      <div class="body" id="fullText"></div>
+      <div class="stat" id="fullStat"></div>
+    </div>
+  </div>
+  <div class="hint">Streams 16&nbsp;kHz mono PCM. Left updates live per chunk; on <b>Stop</b> the server sends the finalized streaming text <i>and</i> a fresh full-audio pass. Open this page from <code>http://localhost:…</code> (mic needs a secure context).</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const startBtn=$("start"),stopBtn=$("stop"),statusEl=$("status");
+const streamText=$("streamText"),fullText=$("fullText"),streamStat=$("streamStat"),fullStat=$("fullStat");
+const host=location.hostname||"192.168.1.225";
+$("ep").value="ws://"+host+":8002/stream_full";
+
+const TARGET_SR=16000, SEND_MS=200;
+let ws=null, audioCtx=null, source=null, processor=null, mediaStream=null;
+let buf=new Float32Array(0), running=false, partials=0, t0=0;
+
+function setStatus(t,cls){statusEl.textContent=t;statusEl.className="pill"+(cls?" "+cls:"");}
+function resample(input, srcSr){
+  if(srcSr===TARGET_SR) return input.slice();
+  const ratio=TARGET_SR/srcSr, n=Math.round(input.length*ratio), out=new Float32Array(n);
+  for(let i=0;i<n;i++){const x=i/ratio, x0=Math.floor(x), x1=Math.min(x0+1,input.length-1), t=x-x0; out[i]=input[x0]*(1-t)+input[x1]*t;}
+  return out;
+}
+function concat(a,b){const o=new Float32Array(a.length+b.length);o.set(a,0);o.set(b,a.length);return o;}
+
+startBtn.onclick=async()=>{
+  if(running) return;
+  streamText.textContent=""; fullText.textContent=""; streamStat.textContent=""; fullStat.textContent="";
+  buf=new Float32Array(0); partials=0;
+  const lang=$("lang").value.trim();
+  let url=$("ep").value.trim(); if(lang) url+=(url.includes("?")?"&":"?")+"language="+encodeURIComponent(lang);
+  try{
+    setStatus("connecting…","warn"); startBtn.disabled=true;
+    ws=new WebSocket(url); ws.binaryType="arraybuffer";
+    ws.onmessage=e=>{ let m; try{m=JSON.parse(e.data)}catch{return;}
+      if(m.type==="error"){ setStatus("err: "+m.detail,"warn"); return; }
+      if(m.type==="partial"){ partials++; if(typeof m.text==="string") streamText.textContent=m.text;
+        streamStat.textContent=partials+" partials"+(m.language?" · "+m.language:""); }
+      if(m.type==="final"){
+        streamText.textContent=m.stream_text||"";
+        fullText.textContent=m.full_text||"";
+        streamStat.textContent=partials+" partials · finalized"+(m.language?" · "+m.language:"");
+        const wall=Math.round(performance.now()-t0);
+        fullStat.textContent="buffered "+m.buffered_sec+"s · full pass "+m.full_pass_ms+" ms · session wall "+wall+" ms";
+        setStatus("done","");
+      }
+    };
+    ws.onerror=()=>setStatus("ws error","warn");
+    ws.onclose=()=>{ if(running) setStatus("ws closed","warn"); };
+    await new Promise((res,rej)=>{ws.onopen=res; ws.addEventListener("error",rej,{once:true});});
+
+    mediaStream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    source=audioCtx.createMediaStreamSource(mediaStream);
+    processor=audioCtx.createScriptProcessor(4096,1,1);
+    const sendSamples=Math.round(TARGET_SR*SEND_MS/1000);
+    processor.onaudioprocess=ev=>{
+      if(!running) return;
+      buf=concat(buf, resample(ev.inputBuffer.getChannelData(0), audioCtx.sampleRate));
+      while(buf.length>=sendSamples){
+        const chunk=buf.slice(0,sendSamples); buf=buf.slice(sendSamples);
+        if(ws.readyState===1) ws.send(chunk.buffer);
+      }
+    };
+    source.connect(processor); processor.connect(audioCtx.destination);
+    running=true; t0=performance.now(); stopBtn.disabled=false; setStatus("listening… 🎙","live");
+  }catch(err){
+    console.error(err); setStatus("start failed: "+err.message,"warn");
+    startBtn.disabled=false; running=false; cleanupAudio();
+    if(ws&&ws.readyState===1) ws.close();
+  }
+};
+
+stopBtn.onclick=async()=>{
+  if(!running) return;
+  running=false; stopBtn.disabled=true; setStatus("finishing…","warn");
+  cleanupAudio();
+  try{
+    if(ws&&ws.readyState===1){
+      if(buf.length>0){ws.send(buf.buffer); buf=new Float32Array(0);}
+      ws.send(JSON.stringify({type:"end"}));
+    }
+  }catch(e){console.error(e);}
+  startBtn.disabled=false;
+};
+
+function cleanupAudio(){
+  try{ if(processor){processor.disconnect();processor.onaudioprocess=null;} if(source)source.disconnect();
+       if(audioCtx)audioCtx.close(); if(mediaStream)mediaStream.getTracks().forEach(t=>t.stop()); }catch(e){}
+  processor=source=audioCtx=mediaStream=null;
+}
+$("clear").onclick=()=>{streamText.textContent="";fullText.textContent="";streamStat.textContent="";fullStat.textContent="";};
+</script>
+</body>
+</html>

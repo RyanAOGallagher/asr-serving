@@ -1,0 +1,393 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anchor Serving Stress Test</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --paper: #fafaf8;
+  --ink: #141412;
+  --ink-2: #565550;
+  --ink-3: #8a8880;
+  --rule: #e3e2dc;
+  --card: #f1f0ec;
+  --serve5090: #2a78d6;
+  --merged5090: #eb6834;
+  --serve3090: #1baf7a;
+  --merged3090: #eda100;
+  --bad: #b3261e;
+  --good: #008300;
+  --accent: #2a78d6;
+  --accent-soft: #e3edf9;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #171716;
+    --ink: #f2f1ec;
+    --ink-2: #c3c2b7;
+    --ink-3: #8a887e;
+    --rule: #33332f;
+    --card: #201f1d;
+    --serve5090: #3987e5;
+    --merged5090: #d95926;
+    --serve3090: #199e70;
+    --merged3090: #c98500;
+    --bad: #e5695f;
+    --good: #3fae3f;
+    --accent: #3987e5;
+    --accent-soft: #1c2a3d;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #171716;
+  --ink: #f2f1ec;
+  --ink-2: #c3c2b7;
+  --ink-3: #8a887e;
+  --rule: #33332f;
+  --card: #201f1d;
+  --serve5090: #3987e5;
+  --merged5090: #d95926;
+  --serve3090: #199e70;
+  --merged3090: #c98500;
+  --bad: #e5695f;
+  --good: #3fae3f;
+  --accent: #3987e5;
+  --accent-soft: #1c2a3d;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 0 20px 80px;
+}
+.wrap { max-width: 900px; margin: 0 auto; }
+header { padding: 44px 0 10px; border-bottom: 2px solid var(--ink); }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+h1 {
+  font-family: Archivo, "IBM Plex Sans", sans-serif;
+  font-weight: 700;
+  font-size: clamp(28px, 4.5vw, 40px);
+  line-height: 1.08;
+  margin: 8px 0 10px;
+  text-wrap: balance;
+}
+.lede { color: var(--ink-2); max-width: 62ch; margin: 0 0 18px; }
+h2 {
+  font-family: Archivo, sans-serif;
+  font-weight: 600;
+  font-size: 21px;
+  margin: 0 0 4px;
+  text-wrap: balance;
+}
+h2 .sect {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: .1em;
+  display: block;
+  margin-bottom: 4px;
+}
+section { margin-top: 52px; }
+section > p { max-width: 68ch; color: var(--ink-2); }
+section > p strong { color: var(--ink); }
+.tablebox { overflow-x: auto; margin-top: 14px; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+th, td { padding: 7px 12px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1.5px solid var(--ink);
+}
+tbody td { border-bottom: 1px solid var(--rule); font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+tbody td:first-child { font-family: "IBM Plex Sans", sans-serif; font-size: 13.5px; }
+tbody tr.hl td { background: var(--accent-soft); }
+td.good { color: var(--good); font-weight: 600; }
+td.bad { color: var(--bad); font-weight: 600; }
+.note { font-size: 13px; color: var(--ink-3); max-width: 68ch; margin-top: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 22px; }
+.tile { background: var(--card); border-radius: 6px; padding: 14px 16px; }
+.tile .k {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+.tile .l { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.chartbox { margin-top: 20px; overflow-x: auto; }
+figcaption { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
+figure { margin: 0; }
+svg text { font-family: "IBM Plex Mono", monospace; }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.verdict {
+  border-left: 3px solid var(--accent);
+  background: var(--card);
+  padding: 14px 18px;
+  border-radius: 0 6px 6px 0;
+  margin-top: 18px;
+  max-width: 70ch;
+}
+.verdict p { margin: 0 0 8px; color: var(--ink); }
+.verdict p:last-child { margin: 0; }
+ol.findings { max-width: 70ch; padding-left: 22px; color: var(--ink-2); }
+ol.findings li { margin-bottom: 10px; }
+ol.findings strong { color: var(--ink); }
+#tip {
+  position: fixed;
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  padding: 5px 9px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity .1s;
+  z-index: 10;
+  white-space: nowrap;
+}
+.footer { margin-top: 60px; padding-top: 14px; border-top: 1px solid var(--rule); font-size: 12.5px; color: var(--ink-3); }
+</style></head><body>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">ASR-Hub · weavers AI lab · 2026-09-08</div>
+  <h1>Anchor Serving Stress Test</h1>
+  <p class="lede">One day of load benchmarks on the production Qwen3-ASR stack: endpoint cost anatomy on the
+  in-office RTX 3090 Ti (<span style="font-family:'IBM Plex Mono',monospace">gpu-225</span>), a rented RTX 5090,
+  and the question that ended up mattering — micro-batched offline inference vs vLLM continuous batching.</p>
+</header>
+
+<section>
+  <h2><span class="sect">01 · TEST SET</span>Sampled from live traffic</h2>
+  <p>500 rows sampled (seed 42) from the last 1,000 requests in <strong>weavers_tts.stt_generation_log</strong>
+  (2026-09-07 08:07 → 09-08 00:53 UTC), then filtered to clips under 5 seconds with fetchable audio.
+  Stress-run rows are tagged <strong>origin=stress-500</strong> in the history table — exclude that origin when sampling future sets.</p>
+  <div class="tiles">
+    <div class="tile"><div class="k">363</div><div class="l">clips in the final set (&lt;5s)</div></div>
+    <div class="tile"><div class="k">2.0s</div><div class="l">median clip length (mean 3.0s)</div></div>
+    <div class="tile"><div class="k">21.5min</div><div class="l">total audio, max clip 18.2s (dropped)</div></div>
+    <div class="tile"><div class="k">84%</div><div class="l">of production clips are &lt;5s</div></div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="sect">02 · ENDPOINT ANATOMY</span>What each endpoint costs (3090 Ti, concurrency 4)</h2>
+  <p>Same 431-clip unfiltered set, measured from the Mac over LAN (network ≈ 25–30 ms of each figure).
+  Each endpoint is the same engine doing a different number of serial hops per request.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Endpoint</th><th>hops / request</th><th>req/s</th><th>p50</th><th>p95</th><th>mean</th></tr></thead>
+    <tbody>
+      <tr><td>/transcribe (plain)</td><td>1 decode</td><td>11.8</td><td>214 ms</td><td>501 ms</td><td>339 ms</td></tr>
+      <tr><td>/transcribe_anchor</td><td>decode + guard, escalates ~20%</td><td>6.4</td><td>369 ms</td><td>1,176 ms</td><td>629 ms</td></tr>
+      <tr><td>/transcribe_smart</td><td>2 decodes on all Latin + guard + Scribe fallback</td><td>5.4</td><td>431 ms</td><td>1,554 ms</td><td>738 ms</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Smart's tail is its external Scribe fallback (47/431 clips @ 1.5 s mean). Anchor's tail is its
+  escalation chain: KO decode → second guard → Xeus, awaited serially. Long clips (5–18 s) poison everyone's
+  p95 — filtering to &lt;5 s cut anchor's p95 from 5.8 s to 1.3 s at concurrency 8 and raised its ceiling from ~7 to ~12 req/s.</p>
+</section>
+
+<section>
+  <h2><span class="sect">03 · SINGLE REQUEST</span>Where one anchor request spends its time</h2>
+  <div class="tiles">
+    <div class="tile"><div class="k">~142 ms</div><div class="l">end-to-end, idle server (median of 20)</div></div>
+    <div class="tile"><div class="k">~110 ms</div><div class="l">server-side pipeline (decode + guard)</div></div>
+    <div class="tile"><div class="k">~28 ms</div><div class="l">network: LAN RTT + 51 KB upload</div></div>
+    <div class="tile"><div class="k">2–5×</div><div class="l">queueing multiplier under saturation</div></div>
+  </div>
+  <p class="note">Under closed-loop load the same request takes 300–500 ms (p50) — the difference is waiting for
+  a micro-batch slot and sharing the guard, not compute. p95 lands on the ~7% of clips that escalate (3–5 hops, 1–1.4 s by design).</p>
+</section>
+
+<section>
+  <h2><span class="sect">04 · ANCHOR PATCH EXPERIMENT</span>Two overlaps, one survivor</h2>
+  <p>Both edits fired independent hops concurrently after the EN decode. Filtered set, 3090 Ti, concurrency 4.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>anchor_service.py variant</th><th>req/s</th><th>p50</th><th>p95</th><th>hangul tier</th><th>outcome</th></tr></thead>
+    <tbody>
+      <tr><td>original (baseline)</td><td>9.3</td><td>304 ms</td><td>798 ms</td><td>792 ms</td><td>—</td></tr>
+      <tr><td>+ speculative KO decode</td><td class="bad">6.6</td><td class="bad">446 ms</td><td class="bad">1,134 ms</td><td>441 ms</td><td class="bad">reverted</td></tr>
+      <tr class="hl"><td>+ ko-guard gather only <span style="color:var(--ink-3)">(deployed)</span></td><td>8.5</td><td>286 ms</td><td>858 ms</td><td class="good">450 ms</td><td class="good">kept</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">The speculation cut escalated-clip latency ~20% but fired a wasted KO decode on ~5× more clips
+  than consumed it; on a saturated GPU that waste came out of everyone's queue (−30% throughput). The gather
+  only runs where both calls are always consumed — Hangul clips got ~340 ms faster for free. Lesson, recorded
+  in the code: speculative work cannot buy tail latency on a saturated shared GPU.</p>
+</section>
+
+<section>
+  <h2><span class="sect">05 · SERVING ARCHITECTURE</span>Micro-batcher vs vLLM continuous batching</h2>
+  <p>The decode engine itself, same model (Qwen3-ASR-1.7B), bare requests. The production design
+  (offline engine + lock + 10 ms coalesce queue) plateaus near 31 req/s no matter the GPU, batch cap
+  (8→32) or VRAM (0.55→0.85): each locked <strong>generate()</strong> returns only when its slowest clip
+  finishes, and nothing joins mid-flight. vLLM serve kept scaling to c64 without saturating the 5090.</p>
+
+  <figure class="chartbox">
+    <svg id="scal" viewBox="0 0 860 380" width="860" height="380" role="img" aria-label="Throughput vs concurrency for four serving configurations">
+      <!-- grid + axes drawn by script -->
+    </svg>
+    <figcaption>Throughput (req/s) vs client concurrency, 363-clip drain. Hover points for exact values.
+    3090 Ti measured over LAN; 5090 on localhost. c64 point drains the set in 0.8 s — treat as ballpark.</figcaption>
+  </figure>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--serve5090)"></i>vLLM serve · 5090</span>
+    <span><i class="sw" style="background:var(--serve3090)"></i>vLLM serve · 3090 Ti</span>
+    <span><i class="sw" style="background:var(--merged5090)"></i>micro-batcher · 5090</span>
+    <span><i class="sw" style="background:var(--merged3090)"></i>micro-batcher · 3090 Ti</span>
+  </div>
+
+  <div class="tablebox"><table>
+    <thead><tr><th>Config</th><th>c4</th><th>c8</th><th>c16</th><th>c32</th><th>c64</th><th>p50 @ c16</th></tr></thead>
+    <tbody>
+      <tr class="hl"><td>vLLM serve · 5090</td><td>63–70</td><td>139–143</td><td>235–242</td><td>340</td><td>467</td><td>60 ms</td></tr>
+      <tr><td>vLLM serve · 3090 Ti</td><td>24.8</td><td>43.8</td><td>58.4</td><td>—</td><td>—</td><td>231 ms</td></tr>
+      <tr><td>micro-batcher · 5090</td><td>12.5</td><td>30.2</td><td>30.8–32.8</td><td>—</td><td>—</td><td>503–526 ms</td></tr>
+      <tr><td>micro-batcher · 3090 Ti</td><td>11.8</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">All figures req/s, zero errors in every run. The serve runs carry no context prompt or
+  logprobs and no aligner/LM in VRAM, so the true engine gap is somewhat under the raw 8–10×; the plateau-vs-scaling
+  shape is structural. The 5090 is ~4× the GPU (serve vs serve), yet under the micro-batcher it beats
+  the 3090 Ti by ~6% at c4 — <strong>the serving design determines whether the silicon is usable.</strong></p>
+</section>
+
+<section>
+  <h2><span class="sect">06 · ANCHOR ON THE 5090</span>The shim works; the tunnel dominates</h2>
+  <p>The full anchor pipeline ran on the rented box with decodes shimmed onto vLLM serve
+  (context via system message, language forcing via assistant-prefill with a custom chat template,
+  logprobs → confidence). Functionally correct — every tier, transcript and gate matched. But the guard
+  still lives on gpu-225, so each request shipped audio through an SSH tunnel via the Mac (~1.3 s round trip),
+  which set the floor for every configuration equally.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Anchor config (c4, guard via WAN tunnel)</th><th>req/s</th><th>p50</th><th>p95</th><th>mean</th><th>errors</th></tr></thead>
+    <tbody>
+      <tr><td>original anchor + vLLM serve (shim)</td><td>2.42</td><td>1,357 ms</td><td>3,511 ms</td><td>1,641 ms</td><td>0</td></tr>
+      <tr><td>gather anchor + vLLM serve (shim)</td><td>2.40</td><td>1,388 ms</td><td>3,582 ms</td><td>1,646 ms</td><td>4</td></tr>
+      <tr><td>original anchor + micro-batcher</td><td>2.00</td><td>1,300 ms</td><td>4,065 ms</td><td>1,991 ms</td><td>0</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Reference: the same pipeline with a local guard does 8.5 req/s @ 286 ms p50 on the 3090 Ti.
+  Errors at higher concurrency were SSH channel drops (sshd MaxSessions ≈ 10), not service failures. The ~20%
+  serve-vs-micro-batcher edge survives even under the tunnel; the real unlock is co-locating the 1.3 GB ZIPA
+  guard next to the engine — projected clean-path ≈ 150–200 ms and throughput bounded by the guard, not decode.</p>
+</section>
+
+<section>
+  <h2><span class="sect">07 · FINDINGS</span>What today established</h2>
+  <ol class="findings">
+    <li><strong>The anchor guard costs ~2× plain decode</strong> (629 vs 339 ms mean) — the price of the
+    fabrication checks, dominated by the ~20% of clips that escalate through the serial KO/guard/Xeus chain.</li>
+    <li><strong>Long clips poison the tail.</strong> Keeping the benchmark to &lt;5 s clips (84% of traffic)
+    removed the entire 5–6 s p95 band. If production mixes long clips, isolate them in a separate worker pool.</li>
+    <li><strong>Network is negligible on LAN</strong> — ~28 ms fixed; all congestion effects are server-side queueing.</li>
+    <li><strong>Speculative decoding hurt under load</strong> (−30% throughput) and was reverted; the zero-waste
+    guard overlap was kept (Hangul clips −43% latency). Deployed on gpu-225.</li>
+    <li><strong>The serving design is worth more than the GPU.</strong> Micro-batcher: ~31 req/s ceiling on a
+    5090. vLLM continuous batching: 242–467 req/s on the same card, 58 on the 3090 Ti. A GPU upgrade without
+    the serving swap buys ~nothing at production concurrency.</li>
+    <li><strong>Anchor logic ports cleanly onto vLLM serve</strong> via a ~50-line flag-gated shim — same tiers,
+    same outputs. Next step for a real end-to-end number: co-locate the guard (and batch it), then re-run c4/8/16.</li>
+  </ol>
+  <div class="verdict">
+    <p><strong>Bottom line:</strong> current production traffic (≈0.02 req/s average) is comfortably served
+    by today's stack. The moment scale or batch backfills matter, the path is: vLLM serve for decode,
+    guard co-located and micro-batched, anchor logic unchanged behind the shim.</p>
+    <p style="color:var(--ink-2);font-size:13px">Pending experiment: three-way anchor benchmark (serve vs
+    micro-batcher vs original code) with the guard on the same machine, c4/8/16.</p>
+  </div>
+</section>
+
+<div class="footer">
+  Test set: dataset/stress_test_500.json (363 clips) · results in dataset/stress_results.json &amp; cb_results.json ·
+  5090 artifacts in /workspace/qwenasr_bench/ · prod state: gpu-225 unchanged + gather patch (rollback: anchor_service.py.bak.gather)
+</div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+(function () {
+  var svg = document.getElementById('scal');
+  var tip = document.getElementById('tip');
+  var css = getComputedStyle(document.documentElement);
+  function v(n) { return css.getPropertyValue(n).trim(); }
+
+  var series = [
+    { name: 'vLLM serve · 5090', color: v('--serve5090'), pts: [[4, 63], [8, 143], [16, 242], [32, 340], [64, 467]] },
+    { name: 'vLLM serve · 3090 Ti', color: v('--serve3090'), pts: [[4, 24.8], [8, 43.8], [16, 58.4]] },
+    { name: 'micro-batcher · 5090', color: v('--merged5090'), pts: [[4, 12.5], [8, 30.2], [16, 31.8]] },
+    { name: 'micro-batcher · 3090 Ti', color: v('--merged3090'), pts: [[4, 11.8]] }
+  ];
+
+  var M = { l: 56, r: 150, t: 16, b: 40 }, W = 860, H = 380;
+  var iw = W - M.l - M.r, ih = H - M.t - M.b;
+  var xs = [4, 8, 16, 32, 64];
+  function X(c) { return M.l + (Math.log2(c) - 2) / 4 * iw; }
+  var ymax = 500;
+  function Y(r) { return M.t + ih - r / ymax * ih; }
+
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(t, a) {
+    var e = document.createElementNS(NS, t);
+    for (var k in a) e.setAttribute(k, a[k]);
+    svg.appendChild(e);
+    return e;
+  }
+  var ink2 = v('--ink-2'), rule = v('--rule');
+
+  [0, 100, 200, 300, 400, 500].forEach(function (yv) {
+    el('line', { x1: M.l, x2: M.l + iw, y1: Y(yv), y2: Y(yv), stroke: rule, 'stroke-width': 1 });
+    el('text', { x: M.l - 8, y: Y(yv) + 4, 'text-anchor': 'end', 'font-size': 11, fill: ink2 }).textContent = yv;
+  });
+  xs.forEach(function (c) {
+    el('text', { x: X(c), y: M.t + ih + 22, 'text-anchor': 'middle', 'font-size': 11, fill: ink2 }).textContent = 'c' + c;
+  });
+  el('text', { x: M.l - 40, y: M.t + 8, 'font-size': 11, fill: ink2 }).textContent = 'req/s';
+
+  series.forEach(function (s) {
+    if (s.pts.length > 1) {
+      var d = s.pts.map(function (p, i) { return (i ? 'L' : 'M') + X(p[0]) + ' ' + Y(p[1]); }).join(' ');
+      el('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': 2.5, 'stroke-linecap': 'round' });
+    }
+    s.pts.forEach(function (p) {
+      var dot = el('circle', { cx: X(p[0]), cy: Y(p[1]), r: 5, fill: s.color, stroke: v('--paper'), 'stroke-width': 2 });
+      var hit = el('circle', { cx: X(p[0]), cy: Y(p[1]), r: 14, fill: 'transparent', style: 'cursor:default' });
+      hit.addEventListener('mousemove', function (ev) {
+        tip.textContent = s.name + ' — c' + p[0] + ': ' + p[1] + ' req/s';
+        tip.style.left = (ev.clientX + 14) + 'px';
+        tip.style.top = (ev.clientY - 10) + 'px';
+        tip.style.opacity = 1;
+        dot.setAttribute('r', 7);
+      });
+      hit.addEventListener('mouseleave', function () { tip.style.opacity = 0; dot.setAttribute('r', 5); });
+    });
+    var last = s.pts[s.pts.length - 1];
+    var lbl = el('text', {
+      x: X(last[0]) + 12, y: Y(last[1]) + 4, 'font-size': 12, 'font-weight': 600, fill: s.color
+    });
+    lbl.textContent = s.name.split(' · ')[0] === 'vLLM serve' ? 'serve · ' + s.name.split(' · ')[1] : 'µbatch · ' + s.name.split(' · ')[1];
+  });
+})();
+</script>
+</body></html>
