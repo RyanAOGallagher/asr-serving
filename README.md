@@ -5,7 +5,7 @@ Everything custom around the Qwen3-ASR serving stack, pulled together 2026-09-10
 | dir | from | what |
 |---|---|---|
 | `prod/` | localasr `~/ASR/Qwen3ASR-streaming/` (live, 2026-09-10) | `server_merged.py` (:8006 micro-batcher), `wrapper_merged.py` (:8002), `anchor_service.py` (`/transcribe_anchor`, includes the ko-guard gather kept from the 2026-09-08 test), run scripts, notes. |
-| `prod/env.example` | localasr `~/ASR/Qwen3ASR/.env` | Key names only (secrets stripped) plus the ANCHOR overrides live in prod. **Prod behaviour = code + this file**: e.g. the 2026-09-10 context-echo floor 5→3 is `ANCHOR_EN_ECHO_MIN_WORDS=3` here, the code default is still 5. |
+| `prod/env.example` | localasr `~/ASR/Qwen3ASR/.env` | Key names only (secrets stripped). No ANCHOR_* overrides in prod since 2026-09-11; anchor tunables are the code defaults (echo floor 3 words). |
 | `prod/guard/` | localasr `~/zipa_test/` | ZIPA guard service (:8010) + GUARD.md. |
 | `shim/` | 5090 box `/workspace/qwenasr_bench/streaming/` | `anchor_service.py` = pristine pre-gather anchor + the vLLM-serve shim (`ANCHOR_BACKEND_MODE=openai` → `_backend_decode_openai`, custom `_CHAT_TEMPLATE`). `cb_swap.sh` swaps `server_merged` ↔ `qwen-asr-serve :8021`. |
 | `bench/` | 5090 box `/workspace/qwenasr_bench/` | load-test scripts + results. `stress_test_500.json` = 363-clip set (<5 s, sampled from live traffic; rows tagged `origin=stress-500`). Audio clips not included. |

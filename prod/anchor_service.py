@@ -48,7 +48,7 @@ XEUS_SUPPORT = float(os.getenv("ANCHOR_XEUS_SUPPORT", "0.70"))
 XEUS_ARBITRATE = os.getenv("ANCHOR_XEUS_ARBITRATE", "1") == "1"  # Xeus scores BOTH EN+KO, argmin + reject if both high
 XEUS_REJECT = float(os.getenv("ANCHOR_XEUS_REJECT", "0.75"))
 XEUS_URL = os.getenv("ANCHOR_XEUS_URL", "http://192.168.1.239:8001/xeus")
-EN_ECHO_MIN_WORDS = int(os.getenv("ANCHOR_EN_ECHO_MIN_WORDS", "5"))
+EN_ECHO_MIN_WORDS = int(os.getenv("ANCHOR_EN_ECHO_MIN_WORDS", "3"))  # 2026-09-11: was 5; 3 fixes quoted-context echoes on short answers (row 163700)
 EN_ECHO_SIM = float(os.getenv("ANCHOR_EN_ECHO_SIM", "0.35"))
 
 FILLER = {"hm", "hmm", "hmmm", "mm", "mmm", "um", "umm", "uh", "uhh"}
