@@ -377,6 +377,7 @@ async def transcribe_anchor(
     phones = len(audio_ipa)
     pfer = g.get("en_pfer_w")
     dbg.update(audio_ipa=audio_ipa, audio_phones=phones, en_pfer_w=pfer, en_ipa=g.get("en_ipa"),
+               en_per=g.get("per_en"), en_pfer_u=g.get("en_pfer_u"),
                fold_en=_fold(g.get("en_ipa") or ""), fold_audio=_fold(g.get("audio_ipa") or ""))
     tier = "clean"
     language = "English"
@@ -393,6 +394,7 @@ async def transcribe_anchor(
         g2 = await guard(audio, filename, ko_text=text)
         perko = g2.get("per_ko")
         dbg.update(branch="hangul", per_ko=perko, ko_ipa=g2.get("ko_ipa"), ctx_copy=ctx_echo(text, ctx0),
+                   ko_pfer_w=g2.get("ko_pfer_w"), ko_pfer_u=g2.get("ko_pfer_u"),
                    fold_ko=_fold(g2.get("ko_ipa") or ""), fold_audio=_fold(g2.get("audio_ipa") or ""))
         # echo = phones in the fabrication band AND a verbatim copy of the context;
         # per_ko alone false-rejects honest short Korean (ZIPA onset drops).
@@ -438,7 +440,7 @@ async def transcribe_anchor(
                     au3 = g3.get("audio_ipa")
                     fe = folded_per(g3.get("en_ipa"), au3)
                     fk = folded_per(g3.get("ko_ipa"), au3)
-                    dbg.update(ko_candidate=ko, ko_ipa=g3.get("ko_ipa"), folded_en_arg=fe, folded_ko_arg=fk,
+                    dbg.update(ko_candidate=ko, ko_ipa=g3.get("ko_ipa"), ko_pfer_w=g3.get("ko_pfer_w"), ko_pfer_u=g3.get("ko_pfer_u"), folded_en_arg=fe, folded_ko_arg=fk,
                                fold_en_arg=_fold(g3.get("en_ipa") or ""), fold_ko_arg=_fold(g3.get("ko_ipa") or ""), fold_audio_arg=_fold(au3 or ""))
                     # measured: honest EN keeps outright (KO scores worse); real
                     # translations win by 0.02–0.4 — margin 0 with tie→EN suffices
@@ -555,7 +557,10 @@ async def transcribe_anchor(
         expected=exp or None,
         ko_text=rejected_ko,
         zipa_ipa=audio_ipa or None,
-        pfer={"en_pfer_w": pfer} if pfer is not None else None,
+        # ZIPA guard outputs, all of them (was only zipa_ipa + en_pfer_w); xeus_ipa stays debug-only
+        en_ipa=dbg.get("en_ipa"), ko_ipa=dbg.get("ko_ipa"),
+        en_per=dbg.get("en_per"), ko_per=dbg.get("per_ko"),
+        pfer={k: dbg.get(k) for k in ("en_pfer_w", "en_pfer_u", "ko_pfer_w", "ko_pfer_u")},
     ))
     return out
 
