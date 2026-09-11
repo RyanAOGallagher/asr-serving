@@ -50,6 +50,7 @@ XEUS_REJECT = float(os.getenv("ANCHOR_XEUS_REJECT", "0.75"))
 XEUS_URL = os.getenv("ANCHOR_XEUS_URL", "http://192.168.1.239:8001/xeus")
 EN_ECHO_MIN_WORDS = int(os.getenv("ANCHOR_EN_ECHO_MIN_WORDS", "3"))  # 2026-09-11: was 5; 3 fixes quoted-context echoes on short answers (row 163700)
 EN_ECHO_SIM = float(os.getenv("ANCHOR_EN_ECHO_SIM", "0.35"))
+XEUS_SILENCE_CONF = float(os.getenv("ANCHOR_XEUS_SILENCE_CONF", "0.9"))  # trial D: Latin output below this conf -> ask Xeus; empty = no speech
 
 FILLER = {"hm", "hmm", "hmmm", "mm", "mmm", "um", "umm", "uh", "uhh"}
 
@@ -356,9 +357,20 @@ async def transcribe_anchor(
         fper = None if en_echo else folded_per(g.get("en_ipa"), g.get("audio_ipa"))
         dbg.update(branch="latin", folded_en=fper, en_echo=en_echo)
         n_words = len(text.split())
+        # trial D: Xeus is a SILENCE witness only (its phones never score text:
+        # they truncate real words to fragments). One call per low-confidence
+        # Latin output; empty = it heard no speech -> no_speech at any word
+        # count. Failed call or any phones = no evidence, ZIPA decides as today.
+        xe_d = None
+        if not en_echo and (minconf is None or minconf < XEUS_SILENCE_CONF):
+            xe_d = await xeus_ipa(audio, filename)
+            dbg.update(xeus_ipa=xe_d, xeus_silence_gate=True)
+            if xe_d == "":
+                text, tier = "", ("short-xeus-empty-reject" if n_words < FOLDED_MIN_WORDS else "long-xeus-empty-reject")
+                n_words = 0
         long_mismatch = (n_words >= FOLDED_MIN_WORDS and fper is not None and fper > FOLDED_BAND)
         weighted_trig = (not FOLDED_ONLY) and (pfer is not None and pfer > PFER_ACCEPT)
-        if not en_echo and (weighted_trig or long_mismatch):
+        if not en_echo and text and (weighted_trig or long_mismatch):
             kd = await backend_decode(audio, filename, ctx0, "Korean")
             ko = (kd.get("text") or "").strip()
             if ko:
@@ -389,7 +401,7 @@ async def transcribe_anchor(
                     # inside the good cases' 0.236-0.297.)
                     handled = False
                     if XEUS_ARBITRATE and fk is not None and 0.6 <= fk <= 0.85:
-                        xe = await xeus_ipa(audio, filename)
+                        xe = xe_d if xe_d is not None else await xeus_ipa(audio, filename)
                         fex = folded_per(g3.get("en_ipa"), xe) if xe else None
                         fkx = folded_per(g3.get("ko_ipa"), xe) if xe else None
                         dbg.update(xeus_ipa=xe, xeus_en=fex, xeus_ko=fkx, fold_xeus=_fold(xe or ""))
@@ -404,7 +416,7 @@ async def transcribe_anchor(
                     if not handled:
                         used_xeus = False
                         if XEUS_FALLBACK and fk is not None and 0.6 <= fk <= 0.85:
-                            xe = await xeus_ipa(audio, filename)
+                            xe = xe_d if xe_d is not None else await xeus_ipa(audio, filename)
                             fkx = folded_per(g3.get("ko_ipa"), xe) if xe else None
                             dbg.update(xeus_ipa=xe, xeus_ko=fkx, fold_xeus=_fold(xe or ""))
                             if fkx is not None:
